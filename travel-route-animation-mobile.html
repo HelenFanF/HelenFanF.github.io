@@ -887,5 +887,18 @@
     loadRoute('chuanxi');
     requestAnimationFrame(resizeCanvas);
   </script>
+  <!-- 网页访问量统计 -->
+  <script src="https://cdn.jsdelivr.net/npm/visitor-counter-api@1.0.0/counter.min.js"></script>
+  <div style="margin-top:40px;text-align:center;color:#777;font-size:14px;">
+    页面总访问次数：<span id="visit-num">0</span>
+  </div>
+  <script>
+  VisitorCounter.config({
+    siteId: "helen-travel-route",
+    render: function(num) {
+      document.getElementById("visit-num").innerText = num;
+    }
+  })
+  </script>
 </body>
 </html>
