@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>手绘自驾路线规划器 · 移动版</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
+  <style>
+    :root {
+      --paper-50: #fdf6ec;
+      --paper-100: #faf0de;
+      --paper-200: #f5e4c8;
+      --paper-300: #edd4a8;
+      --ink-600: #6b5a4e;
+      --ink-700: #524138;
+      --ink-800: #3c2415;
+      --ink-900: #2a180d;
+      --accent-500: #c43a31;
+      --accent-600: #a33028;
+      --sketch-300: #c4a882;
+      --sketch-400: #b8936a;
+      --sketch-500: #a07848;
+      --bg-color: #fdf6ec;
+      --bg-gradient: radial-gradient(circle at 20% 30%, #fffbf5 0%, #faf0de 80%);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; min-height: 100%;
+      background: var(--bg-color);
+      background-image: var(--bg-gradient);
+      color: var(--ink-800);
+      font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      overscroll-behavior-y: contain;
+    }
+    body { padding-bottom: env(safe-area-inset-bottom); }
+    .app-shell { width: 100%; max-width: 520px; min-height: 100dvh; margin: 0 auto; display: flex; flex-direction: column; }
+    .glass-panel {
+      background: rgba(254,250,243,0.92); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(196,168,130,0.35); box-shadow: 0 8px 32px rgba(164,100,45,0.08);
+    }
+    .btn-hand {
+      transition: all 0.2s ease; border: 2px solid var(--ink-800);
+      background: rgba(253,246,236,0.9); color: var(--ink-800);
+      box-shadow: 2px 2px 0 rgba(60,36,21,0.15); border-radius: 12px; min-height: 44px; font-weight: 700;
+    }
+    .btn-hand:active { transform: translateY(1px); box-shadow: 1px 1px 0 rgba(60,36,21,0.2); }
+    .btn-primary { background: var(--accent-500); color: white; border-color: var(--accent-600); box-shadow: 2px 2px 0 var(--accent-600); }
+    .stat-card { border: 1px solid rgba(196,168,130,0.35); background: rgba(255,255,255,0.42); border-radius: 16px; padding: 10px 12px; }
+    .map-frame { height: min(58dvh, 560px); min-height: 380px; max-height: 620px; transition: border-radius 0.25s ease, box-shadow 0.25s ease; }
+    body.is-playing-fullscreen { overflow: hidden; }
+    body.is-playing-fullscreen .app-shell { max-width: none; }
+    body.is-playing-fullscreen .map-frame {
+      position: fixed; inset: 0; z-index: 80; width: 100vw; height: 100dvh;
+      min-height: 100dvh; max-height: none; border-radius: 0; border: 0; box-shadow: none;
+    }
+    body.is-playing-fullscreen #routeBadge { display: none; }
+    body.is-playing-fullscreen .bottom-controls { display: none; }
+    #mapCanvas { width: 100%; height: 100%; display: block; touch-action: none; }
+    .route-item {
+      display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center;
+      padding: 10px 0; border-bottom: 1px dashed rgba(196,168,130,0.45);
+    }
+    .route-item:last-child { border-bottom: 0; }
+    .route-dot {
+      width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 999px; border: 1.5px solid var(--ink-700); background: var(--paper-50);
+      color: var(--ink-700); font-size: 12px; font-weight: 800;
+    }
+    .route-item.active .route-dot, .route-item.reached .route-dot {
+      background: var(--accent-500); border-color: var(--accent-600); color: white;
+    }
+    .route-item.highlight .route-title { color: var(--accent-500); font-weight: 800; }
+    .range-input { accent-color: var(--accent-500); height: 28px; }
+    .bottom-controls {
+      position: sticky; bottom: 0; z-index: 20; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+      background: linear-gradient(to top, rgba(253,246,236,0.98), rgba(253,246,236,0.76), transparent);
+    }
+    .route-list { max-height: 42dvh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .route-list::-webkit-scrollbar { width: 4px; }
+    .route-list::-webkit-scrollbar-track { background: rgba(196,168,130,0.1); }
+    .route-list::-webkit-scrollbar-thumb { background: rgba(196,168,130,0.45); border-radius: 999px; }
+    .toast {
+      position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); z-index: 100;
+      transform: translateX(-50%) translateY(12px); opacity: 0; pointer-events: none;
+      transition: all 0.25s ease; background: var(--ink-800); color: white;
+      border-radius: 999px; padding: 9px 18px; font-size: 13px; white-space: nowrap;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    body.is-playing-fullscreen .toast { z-index: 120; bottom: calc(88px + env(safe-area-inset-bottom)); }
+    .fullscreen-hud {
+      position: absolute; inset: 0; z-index: 6; display: none;
+      flex-direction: column; justify-content: space-between;
+      padding: calc(14px + env(safe-area-inset-top)) 14px calc(14px + env(safe-area-inset-bottom));
+      pointer-events: none;
+    }
+    body.is-playing-fullscreen .fullscreen-hud { display: flex; }
+    .fullscreen-topbar, .fullscreen-bottombar { display: flex; align-items: center; justify-content: space-between; gap: 10px; pointer-events: auto; }
+    .fullscreen-info { max-width: min(62vw, 360px); padding: 10px 12px; border-radius: 18px; }
+    .fullscreen-info span { display: block; font-size: 11px; color: var(--sketch-500); }
+    .fullscreen-info strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+    .fullscreen-actions { display: flex; gap: 8px; }
+    .fullscreen-actions .btn-hand { min-height: 40px; padding: 0 12px; font-size: 13px; background: rgba(253,246,236,0.94); }
+    .fullscreen-bottombar { align-items: flex-end; }
+    .fullscreen-progress-shell {
+      flex: 1; height: 7px; border-radius: 999px; overflow: hidden;
+      background: rgba(196,168,130,0.22); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35);
+    }
+    .fullscreen-progress-bar { display: block; width: 0%; height: 100%; border-radius: inherit; background: var(--accent-500); transition: width 0.12s linear; }
+    .library-modal {
+      position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.5);
+      display: flex; align-items: flex-end; justify-content: center;
+    }
+    .library-content {
+      width: 100%; max-height: 80dvh; background: var(--paper-50); border-radius: 24px 24px 0 0;
+      padding: 20px; overflow-y: auto;
+    }
+    @media (max-width: 380px) { .map-frame { min-height: 340px; } }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="glass-panel rounded-b-3xl px-4 pt-4 pb-3 sticky top-0 z-30">
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <i class="fa fa-compass text-3xl" style="color: var(--accent-500)"></i>
+          <div class="min-w-0">
+            <h1 class="text-xl font-bold tracking-wide truncate">手绘自驾路线规划器</h1>
+            <p class="text-xs italic" style="color: var(--sketch-500)">移动端 · 轻量展示版</p>
+          </div>
+        </div>
+        <button id="themeBtn" class="btn-hand px-3 text-xs shrink-0">
+          <i class="fa fa-paint-brush mr-1"></i><span id="themeName">敦煌矿物</span>
+        </button>
+      </div>
+      <div class="grid grid-cols-3 gap-2 mt-4">
+        <div class="stat-card">
+          <p class="text-[11px]" style="color: var(--sketch-500)">全程直线约</p>
+          <p class="text-lg font-bold"><span id="totalDistance">0</span><span class="text-xs ml-1">km</span></p>
+        </div>
+        <div class="stat-card">
+          <p class="text-[11px]" style="color: var(--sketch-500)">地点</p>
+          <p class="text-lg font-bold"><span id="locationCount">0</span><span class="text-xs ml-1">处</span></p>
+        </div>
+        <div class="stat-card">
+          <p class="text-[11px]" style="color: var(--sketch-500)">进度</p>
+          <p class="text-lg font-bold"><span id="progressText">0</span><span class="text-xs ml-1">%</span></p>
+        </div>
+      </div>
+    </header>
+
+    <section class="px-3 pt-3 flex-1">
+      <div class="glass-panel rounded-3xl overflow-hidden map-frame relative">
+        <canvas id="mapCanvas"></canvas>
+        <div id="routeBadge" class="absolute left-3 top-3 glass-panel rounded-2xl px-3 py-2 text-xs">
+          <div class="font-bold" id="routeName">川西环线</div>
+          <div style="color: var(--sketch-500)">手绘路线 · 动画预览</div>
+        </div>
+        <div class="absolute right-3 bottom-3 w-14 h-14 flex items-center justify-center rounded-full glass-panel">
+          <svg class="absolute w-full h-full -rotate-90" viewBox="0 0 56 56">
+            <circle cx="28" cy="28" r="23" stroke="rgba(196,168,130,0.22)" stroke-width="4" fill="none"></circle>
+            <circle id="progressCircle" cx="28" cy="28" r="23" stroke="var(--accent-500)" stroke-width="4" fill="none" stroke-linecap="round" stroke-dasharray="144.51" stroke-dashoffset="144.51"></circle>
+          </svg>
+          <span class="text-xs font-bold" style="color: var(--accent-500)"><span id="circlePercent">0</span>%</span>
+        </div>
+        <div class="fullscreen-hud">
+          <div class="fullscreen-topbar">
+            <div class="fullscreen-info glass-panel">
+              <span>正在播放</span>
+              <strong id="fullscreenCurrent">准备出发</strong>
+            </div>
+            <div class="fullscreen-actions">
+              <button id="fullscreenPauseBtn" class="btn-hand"><i class="fa fa-pause mr-1"></i>暂停</button>
+              <button id="fullscreenExitBtn" class="btn-hand"><i class="fa fa-compress mr-1"></i>退出</button>
+            </div>
+          </div>
+          <div class="fullscreen-bottombar">
+            <div class="fullscreen-progress-shell"><span id="fullscreenProgressBar" class="fullscreen-progress-bar"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 经典路书 -->
+      <div class="glass-panel rounded-3xl p-4 mt-3">
+        <label for="routeSelect" class="block text-xs font-bold uppercase tracking-wide mb-2" style="color: var(--ink-700)">经典路书 / 我的路线</label>
+        <div class="flex gap-2">
+          <select id="routeSelect" class="flex-1 min-w-0 rounded-xl border px-3 py-3 bg-white/60 text-sm" style="border-color: var(--sketch-300); color: var(--ink-800)">
+          </select>
+          <button id="loadRouteBtn" class="btn-hand btn-primary px-4 text-sm">加载</button>
+        </div>
+        <button id="deleteCustomRouteBtn" class="btn-hand w-full mt-2 py-2 text-xs" style="color: var(--accent-500); border-color: var(--accent-500); display: none;">删除当前路线</button>
+      </div>
+
+      <!-- 规划您的西部线路（自定义） -->
+      <div class="glass-panel rounded-3xl p-4 mt-3">
+        <h2 class="font-bold text-lg mb-2">规划您的西部线路</h2>
+        <input type="text" id="customRouteName" placeholder="第一步输入新路线名称" class="w-full px-3 py-2 rounded-lg border mb-2 text-sm" style="border-color: var(--sketch-300)">
+        <div class="flex gap-2 mb-2">
+          <div class="relative flex-1">
+            <input id="spotSearch" type="text" placeholder="第二步搜索地点（输入名称）" class="w-full px-3 py-2 rounded-lg border text-sm" style="border-color: var(--sketch-300)" autocomplete="off">
+            <i class="fa fa-search absolute right-3 top-3 text-xs" style="color: var(--sketch-400)"></i>
+          </div>
+          <button id="openLibraryBtn" class="btn-hand px-3 text-sm">地点库</button>
+        </div>
+        <div class="max-h-32 overflow-y-auto mb-2 text-sm" id="customLocationList"></div>
+        <div class="flex gap-2">
+          <button id="saveCustomRouteBtn" class="btn-hand btn-primary flex-1 py-2 text-sm">第三步保存路线</button>
+          <button id="clearCustomBtn" class="btn-hand flex-1 py-2 text-sm">清空编辑</button>
+        </div>
+      </div>
+
+      <!-- 途经点列表 -->
+      <section class="glass-panel rounded-3xl p-4 mt-3 mb-4">
+        <div class="flex items-center justify-between mb-1">
+          <h2 class="font-bold text-lg">途经点</h2>
+          <span id="currentStop" class="text-xs px-2 py-1 rounded-full" style="background: var(--paper-200); color: var(--sketch-500)">准备出发</span>
+        </div>
+        <div id="routeList" class="route-list"></div>
+      </section>
+    </section>
+
+    <section class="bottom-controls">
+      <div class="glass-panel rounded-3xl p-3">
+        <div class="grid grid-cols-3 gap-2">
+          <button id="playBtn" class="btn-hand btn-primary text-sm"><i class="fa fa-play mr-1"></i>播放</button>
+          <button id="pauseBtn" class="btn-hand text-sm"><i class="fa fa-pause mr-1"></i>暂停</button>
+          <button id="resetBtn" class="btn-hand text-sm"><i class="fa fa-refresh mr-1"></i>重置</button>
+        </div>
+        <div class="flex items-center gap-3 mt-3">
+          <span class="text-xs" style="color: var(--sketch-500)">进度</span>
+          <input id="progressRange" class="range-input flex-1" type="range" min="0" max="100" value="0">
+          <span class="text-xs w-10 text-right" style="color: var(--accent-500)"><span id="progressValue">0</span>%</span>
+        </div>
+        <div class="flex items-center gap-3 mt-1">
+          <span class="text-xs" style="color: var(--sketch-500)">速度</span>
+          <input id="speedRange" class="range-input flex-1" type="range" min="0.5" max="2.5" step="0.1" value="1">
+          <span class="text-xs w-10 text-right" style="color: var(--accent-500)"><span id="speedValue">1.0</span>x</span>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div id="toast" class="toast"></div>
+  <div id="libraryModal" class="library-modal hidden">
+    <div class="library-content">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-bold text-lg">西部自驾地点库</h3>
+        <button id="closeLibraryBtn" class="text-2xl" style="color: var(--sketch-500)">&times;</button>
+      </div>
+      <input id="librarySearch" type="text" placeholder="在库中筛选..." class="w-full px-3 py-2 rounded-lg border mb-3 text-sm" style="border-color: var(--sketch-300)">
+      <div id="libraryList" class="grid grid-cols-2 gap-2 text-sm"></div>
+    </div>
+  </div>
+
+  <script>
+    // ========== 地点类型图标映射 ==========
+    const typeIcons = {
+      city: '🏙️',
+      mountain: '⛰️',
+      lake: '🌊',
+      heritage: '🏛️',
+      desert: '🏜️',
+      scenic: '🌄',
+      camping: '⛺',
+      canyon: '🏞️',
+      forest: '🌲',
+      temple: '🏯',
+      glacier: '❄️',
+      volcano: '🌋',
+      grassland: '🌾',
+      hotSpring: '♨️',
+      waterfall: '💧',
+      monastery: '🏯',
+      palace: '🏛️',
+      fortress: '🏰',
+      cave: '🕳️',
+      peak: '⛰️',
+      valley: '🏞️',
+      river: '🌊'
+    };
+
+    const colorThemes = {
+      dunhuang: { name:'敦煌矿物','--paper-50':'#fdf6ec','--paper-100':'#faf0de','--paper-200':'#f5e4c8','--paper-300':'#edd4a8','--ink-600':'#6b5a4e','--ink-700':'#524138','--ink-800':'#3c2415','--ink-900':'#2a180d','--accent-500':'#c43a31','--accent-600':'#a33028','--sketch-300':'#c4a882','--sketch-400':'#b8936a','--sketch-500':'#a07848','--bg-color':'#fdf6ec','--bg-gradient':'radial-gradient(circle at 20% 30%, #fffbf5 0%, #faf0de 80%)' },
+      jiangnan: { name:'江南翠野','--paper-50':'#f7faf5','--paper-100':'#edf3e8','--paper-200':'#dce8d2','--paper-300':'#cbdbbc','--ink-600':'#4a5a3f','--ink-700':'#3a4830','--ink-800':'#2d3724','--ink-900':'#1d2616','--accent-500':'#4caf50','--accent-600':'#388e3c','--sketch-300':'#a5c89a','--sketch-400':'#8ab878','--sketch-500':'#6ea35c','--bg-color':'#f7faf5','--bg-gradient':'radial-gradient(circle at 20% 30%, #fcfff7 0%, #edf3e8 80%)' },
+      saibei: { name:'塞北风沙','--paper-50':'#f5f3ef','--paper-100':'#e8e3d8','--paper-200':'#d9cfbc','--paper-300':'#c9b99f','--ink-600':'#5c5346','--ink-700':'#483f33','--ink-800':'#332c22','--ink-900':'#201b14','--accent-500':'#9c6644','--accent-600':'#7f4f24','--sketch-300':'#b08968','--sketch-400':'#9c6644','--sketch-500':'#7f4f24','--bg-color':'#f5f3ef','--bg-gradient':'radial-gradient(circle at 20% 30%, #f9f6f0 0%, #e8e3d8 80%)' },
+      yunnan: { name:'云南彩墨','--paper-50': '#f7f3e9', '--paper-100': '#ede7d9', '--paper-200': '#e0d4b9', '--paper-300': '#d2c099','--ink-600': '#5d4037', '--ink-700': '#4e342e', '--ink-800': '#3e2723', '--ink-900': '#2e1b18','--accent-500': '#e91e63', '--accent-600': '#c2185b','--sketch-300': '#bcaaa4', '--sketch-400': '#a1887f', '--sketch-500': '#8d6e63', '--bg-color': '#f7f3e9', '--bg-gradient': 'radial-gradient(circle at 20% 30%, #fff8e6 0%, #ede7d9 80%)'},
+      nordic: { name:'北欧简约','--paper-50':'#f9f9f9','--paper-100':'#f0f0f0','--paper-200':'#e0e0e0','--paper-300':'#d0d0d0','--ink-600':'#616161','--ink-700':'#424242','--ink-800':'#212121','--ink-900':'#0a0a0a','--accent-500':'#2196f3','--accent-600':'#1976d2','--sketch-300':'#9e9e9e','--sketch-400':'#757575','--sketch-500':'#616161','--bg-color':'#f9f9f9','--bg-gradient':'radial-gradient(circle at 20% 30%, #ffffff 0%, #f0f0f0 80%)' }
+    };
+
+    // 完整地点库
+    const fullDatabase = [
+      {name:'成都',lon:104.07,lat:30.67,type:'city',altitude:505},{name:'红原',lon:102.55,lat:32.79,type:'mountain',altitude:3500},{name:'阿坝',lon:102.02,lat:32.90,type:'mountain',altitude:3290},{name:'久治',lon:101.48,lat:33.43,type:'mountain',altitude:3600},{name:'大武镇',lon:100.24,lat:34.81,type:'city',altitude:3700},{name:'甘德',lon:99.89,lat:33.97,type:'mountain',altitude:4000},{name:'格尔木',lon:94.90,lat:36.41,type:'city',altitude:2808},{name:'察尔汗盐湖',lon:94.78,lat:36.83,type:'lake',highlight:true,altitude:2670},{name:'水上雅丹',lon:93.18,lat:37.62,type:'desert',altitude:2800},{name:'火星营地',lon:92.92,lat:37.90,type:'desert',altitude:2800},{name:'茫崖',lon:90.80,lat:38.25,type:'desert',altitude:2800},{name:'米兰古城',lon:88.93,lat:38.91,type:'heritage',altitude:900},{name:'若羌博物馆',lon:88.16,lat:39.03,type:'heritage',altitude:800},{name:'库尔勒',lon:86.13,lat:41.82,type:'city',altitude:950},{name:'乌鲁木齐',lon:87.62,lat:43.82,type:'city',altitude:800},{name:'独山子',lon:84.83,lat:44.84,type:'city',altitude:500},{name:'独库公路北段',lon:84.55,lat:44.46,type:'mountain',altitude:2000},{name:'百里画廊',lon:83.65,lat:44.12,type:'camping',altitude:1800},{name:'那拉提空中草原',lon:83.69,lat:43.46,type:'camping',altitude:1800},{name:'巴音布鲁克',lon:84.14,lat:42.98,type:'mountain',altitude:2500},{name:'天山大峡谷',lon:83.13,lat:42.11,type:'canyon',altitude:1600},{name:'火焰山',lon:89.52,lat:42.93,type:'desert',altitude:500},{name:'柏孜克里克千佛洞',lon:89.62,lat:42.85,type:'heritage',altitude:600},{name:'哈密',lon:93.46,lat:42.82,type:'city',altitude:760},{name:'白石头温泉',lon:93.94,lat:43.28,type:'lake',highlight:true,altitude:1800},{name:'敦煌',lon:94.67,lat:40.14,type:'city',altitude:1139},{name:'莫高窟',lon:94.81,lat:40.05,type:'heritage',highlight:true,altitude:1330},{name:'鸣沙山月牙泉',lon:94.68,lat:40.10,type:'desert',highlight:true,altitude:1150},{name:'德令哈',lon:97.34,lat:37.38,type:'city',altitude:2980},{name:'茶卡盐湖',lon:99.08,lat:36.76,type:'lake',highlight:true,altitude:3059},{name:'青海湖',lon:100.14,lat:36.94,type:'lake',highlight:true,altitude:3200},{name:'都江堰',lon:103.62,lat:31.00,type:'heritage',altitude:730},{name:'四姑娘山',lon:102.83,lat:31.07,type:'mountain',highlight:true,altitude:3200},{name:'丹巴藏寨',lon:101.88,lat:30.88,type:'heritage',altitude:1800},{name:'色达',lon:100.33,lat:32.27,type:'heritage',highlight:true,altitude:4000},{name:'稻城亚丁',lon:100.31,lat:28.55,type:'mountain',highlight:true,altitude:4100},{name:'理塘',lon:100.27,lat:29.99,type:'city',altitude:4014},{name:'康定',lon:101.96,lat:30.05,type:'city',altitude:2560},{name:'新都桥',lon:101.53,lat:30.04,type:'scenic',highlight:true,altitude:3300},{name:'塔公草原',lon:101.54,lat:30.32,type:'camping',altitude:3730},{name:'墨石公园',lon:101.67,lat:30.55,type:'canyon',highlight:true,altitude:3500},{name:'鱼子西',lon:101.77,lat:30.31,type:'scenic',altitude:4200},{name:'海螺沟',lon:102.11,lat:29.61,type:'mountain',highlight:true,altitude:1600},{name:'毕棚沟',lon:103.23,lat:31.36,type:'lake',altitude:2015},{name:'九寨沟',lon:103.92,lat:33.26,type:'lake',highlight:true,altitude:2000},{name:'喀纳斯',lon:87.03,lat:48.70,type:'lake',highlight:true,altitude:1374},{name:'禾木村',lon:87.45,lat:48.55,type:'camping',highlight:true,altitude:1124},{name:'赛里木湖',lon:81.37,lat:44.61,type:'lake',highlight:true,altitude:2073},{name:'果子沟大桥',lon:81.16,lat:44.48,type:'scenic',altitude:2000},{name:'霍城薰衣草',lon:80.87,lat:44.06,type:'scenic',altitude:600},{name:'喀什古城',lon:75.99,lat:39.47,type:'heritage',highlight:true,altitude:1289},{name:'克拉玛依',lon:84.89,lat:45.59,type:'city',altitude:400},{name:'吐鲁番',lon:89.19,lat:42.95,type:'city',altitude:30},{name:'阿克苏',lon:80.27,lat:41.17,type:'city',altitude:1100},{name:'库车',lon:82.97,lat:41.72,type:'city',altitude:1070},{name:'和田',lon:79.92,lat:37.11,type:'city',altitude:1370},{name:'伊宁',lon:81.32,lat:43.91,type:'city',altitude:620},{name:'阿勒泰',lon:88.14,lat:47.84,type:'city',altitude:735},{name:'石河子',lon:86.04,lat:44.31,type:'city',altitude:440},{name:'塔城',lon:82.98,lat:46.74,type:'city',altitude:540},{name:'西宁',lon:101.78,lat:36.62,type:'city',altitude:2260},{name:'塔尔寺',lon:101.58,lat:36.47,type:'heritage',highlight:true,altitude:2690},{name:'卓尔山',lon:100.24,lat:38.14,type:'mountain',altitude:4300},{name:'祁连山大草原',lon:100.94,lat:38.02,type:'camping',highlight:true,altitude:3000},{name:'门源油菜花',lon:101.62,lat:37.38,type:'scenic',highlight:true,altitude:2860},{name:'冷湖石油小镇',lon:93.36,lat:38.73,type:'heritage',altitude:2800},{name:'可可西里索南达杰保护站',lon:94.24,lat:35.55,type:'heritage',highlight:true,altitude:4479},{name:'拉萨',lon:91.13,lat:29.65,type:'city',altitude:3650},{name:'日喀则',lon:88.88,lat:29.27,type:'city',altitude:3836},{name:'林芝',lon:94.36,lat:29.65,type:'city',altitude:3000},{name:'昌都',lon:97.18,lat:31.14,type:'city',altitude:3240},{name:'那曲',lon:92.07,lat:31.48,type:'city',altitude:4500},{name:'阿里',lon:80.10,lat:32.50,type:'city',altitude:4500},{name:'山南',lon:91.77,lat:29.24,type:'city',altitude:3580},{name:'珠峰大本营',lon:86.85,lat:28.14,type:'mountain',highlight:true,altitude:5200},{name:'冈仁波齐',lon:81.25,lat:31.07,type:'mountain',highlight:true,altitude:6656},{name:'张掖丹霞',lon:100.03,lat:38.93,type:'canyon',highlight:true,altitude:1800},{name:'嘉峪关',lon:98.22,lat:39.80,type:'heritage',highlight:true,altitude:1600},{name:'雅鲁藏布大峡谷',lon:94.80,lat:29.50,type:'canyon',highlight:true,altitude:2880},{name:'布达拉宫',lon:91.13,lat:29.66,type:'heritage',highlight:true,altitude:3750},{name:'纳木错',lon:90.60,lat:30.78,type:'lake',highlight:true,altitude:4718},{name:'羊卓雍措',lon:90.65,lat:28.98,type:'lake',highlight:true,altitude:4441},{name:'大理古城',lon:100.17,lat:25.68,type:'heritage',altitude:2090},{name:'丽江古城',lon:100.23,lat:26.88,type:'heritage',altitude:2418},{name:'泸沽湖',lon:100.83,lat:27.68,type:'lake',highlight:true,altitude:2690},{name:'玉龙雪山',lon:100.18,lat:27.10,type:'mountain',highlight:true,altitude:5596},{name:'香格里拉',lon:99.70,lat:27.83,type:'city',altitude:3300},{name:'甘南扎尕那',lon:103.20,lat:34.24,type:'mountain',highlight:true,altitude:3000},{name:'呼伦贝尔大草原',lon:119.75,lat:49.20,type:'camping',highlight:true,altitude:650},{name:'额济纳胡杨林',lon:101.07,lat:41.97,type:'scenic',highlight:true,altitude:1000},{name:'腾格里沙漠',lon:104.80,lat:38.68,type:'desert',altitude:1200},{name:'荔波小七孔',lon:107.89,lat:25.28,type:'lake',highlight:true,altitude:425},{name:'大昭寺',lon:91.132,lat:29.657,type:'heritage',altitude:3650},{name:'扎什伦布寺',lon:88.88,lat:29.27,type:'heritage',altitude:3836},{name:'萨迦寺',lon:88.02,lat:28.91,type:'heritage',altitude:4316},{name:'色拉寺',lon:91.14,lat:29.68,type:'heritage',altitude:3800},{name:'哲蚌寺',lon:91.05,lat:29.67,type:'heritage',altitude:3800},{name:'甘丹寺',lon:91.49,lat:29.75,type:'heritage',altitude:3800},{name:'楚布寺',lon:90.75,lat:29.73,type:'heritage',altitude:4300},{name:'白居寺',lon:89.61,lat:28.92,type:'heritage',altitude:3900},{name:'桑耶寺',lon:91.50,lat:29.32,type:'heritage',altitude:3650},{name:'孜珠寺',lon:95.83,lat:31.41,type:'heritage',highlight:true,altitude:4800},{name:'郎木寺',lon:102.63,lat:34.09,type:'heritage',altitude:3337},{name:'拉卜楞寺',lon:102.52,lat:35.20,type:'heritage',highlight:true,altitude:3000},{name:'亚青寺',lon:99.42,lat:31.35,type:'heritage',highlight:true,altitude:4000},{name:'德格印经院',lon:98.58,lat:31.82,type:'heritage',highlight:true,altitude:3240},{name:'长青春科尔寺',lon:100.27,lat:29.99,type:'heritage',altitude:4014},{name:'松赞林寺',lon:99.70,lat:27.86,type:'heritage',highlight:true,altitude:3300},{name:'五当召',lon:110.31,lat:40.81,type:'heritage',altitude:1050},{name:'塔公寺',lon:101.54,lat:30.32,type:'heritage',altitude:3730},{name:'敏珠林寺',lon:91.41,lat:29.32,type:'heritage',altitude:3750},{name:'夏鲁寺',lon:88.98,lat:29.10,type:'heritage',altitude:4000},{name:'托林寺',lon:79.80,lat:31.48,type:'heritage',altitude:3800},{name:'科迦寺',lon:80.30,lat:30.80,type:'heritage',altitude:3850},{name:'热振寺',lon:91.52,lat:30.32,type:'heritage',altitude:4200},{name:'直贡梯寺',lon:92.08,lat:30.08,type:'heritage',altitude:4400},{name:'达隆寺',lon:91.95,lat:30.42,type:'heritage',altitude:3800},{name:'类乌齐寺',lon:96.59,lat:31.36,type:'heritage',altitude:3800},{name:'强巴林寺',lon:97.18,lat:31.14,type:'heritage',altitude:3240},{name:'隆务寺',lon:102.00,lat:35.51,type:'heritage',altitude:2600},{name:'阿琼南宗寺',lon:101.85,lat:36.08,type:'heritage',altitude:3000},{name:'瞿昙寺',lon:102.28,lat:36.35,type:'heritage',altitude:2300},{name:'禅定寺',lon:103.52,lat:34.59,type:'heritage',altitude:2600},{name:'米拉日巴佛阁',lon:102.92,lat:34.98,type:'heritage',altitude:2600},{name:'却藏寺',lon:102.12,lat:36.94,type:'heritage',altitude:2800},{name:'天堂寺',lon:102.46,lat:36.94,type:'heritage',altitude:2200},{name:'广惠寺',lon:101.52,lat:36.86,type:'heritage',altitude:2600},{name:'悬空寺',lon:113.71,lat:39.66,type:'heritage',highlight:true,altitude:1500},{name:'法门寺',lon:107.90,lat:34.43,type:'heritage',highlight:true,altitude:600},{name:'大慈恩寺',lon:108.97,lat:34.22,type:'heritage',altitude:400},{name:'青城山',lon:103.57,lat:30.90,type:'mountain',altitude:1260},{name:'崆峒山',lon:106.68,lat:35.55,type:'mountain',altitude:2123},{name:'惠远寺',lon:101.52,lat:30.58,type:'heritage',altitude:3500},{name:'八邦寺',lon:98.78,lat:31.56,type:'heritage',altitude:3800},{name:'白玉寺',lon:98.82,lat:31.02,type:'heritage',altitude:3030},{name:'多科寺', lon:99.58, lat:31.04, type:'temple', altitude:3900},{name:'竹庆寺',lon:98.45,lat:32.00,type:'heritage',altitude:3950},{name:'协庆寺',lon:98.62,lat:31.98,type:'heritage',altitude:3900},{name:'更庆寺',lon:98.57,lat:31.82,type:'heritage',altitude:3240},{name:'宗萨寺',lon:98.62,lat:31.65,type:'heritage',altitude:3600},{name:'色须寺',lon:98.03,lat:32.98,type:'heritage',altitude:4200},{name:'木里大寺',lon:100.83,lat:28.12,type:'heritage',altitude:2600},{name:'棒托寺',lon:101.15,lat:32.53,type:'heritage',altitude:3200},{name:'曾克寺',lon:101.05,lat:32.37,type:'heritage',altitude:3200},{name:'确尔基寺',lon:101.11,lat:32.29,type:'heritage',altitude:3100},{name:'各莫寺',lon:101.70,lat:33.08,type:'heritage',altitude:3280},{name:'格尔登寺',lon:101.70,lat:32.89,type:'heritage',altitude:3290},{name:'嘛通寺',lon:100.30,lat:29.90,type:'temple',altitude:3800},{name:'寿灵寺',lon:100.68,lat:31.39,type:'temple',altitude:3250},{name:'麦洼寺',lon:102.62,lat:32.82,type:'heritage',altitude:3500},{name:'观音庙',lon:101.72,lat:31.48,type:'heritage',altitude:2500},{name:'昌列寺',lon:102.27,lat:31.91,type:'heritage',altitude:2600},{name:'大藏寺',lon:102.28,lat:32.08,type:'heritage',altitude:3500},{name:'索格藏寺',lon:102.47,lat:33.62,type:'heritage',altitude:3468},{name:'噶陀寺',lon:98.98,lat:31.18,type:'heritage',altitude:4000},{name:'直热普寺',lon:91.45,lat:29.75,type:'heritage',altitude:3800},{name:'古入江寺',lon:97.10,lat:31.20,type:'heritage',altitude:3700},{name:'贡不日寺',lon:92.00,lat:29.60,type:'heritage',altitude:3650},{name:'泸定',lon:102.24,lat:29.92,type:'city',altitude:1321},{name:'丹巴',lon:101.90,lat:30.85,type:'city',altitude:1800},{name:'九龙',lon:101.52,lat:29.00,type:'city',altitude:2980},{name:'雅江',lon:101.02,lat:30.03,type:'city',altitude:2570},{name:'道孚',lon:101.13,lat:30.98,type:'city',altitude:2980},{name:'炉霍',lon:100.68,lat:31.39,type:'city',altitude:3250},{name:'甘孜县',lon:99.97,lat:31.62,type:'city',altitude:3390},{name:'新龙',lon:100.31,lat:30.95,type:'city',altitude:3030},{name:'德格',lon:98.58,lat:31.82,type:'city',altitude:3240},{name:'石渠',lon:98.10,lat:32.98,type:'city',altitude:4200},{name:'色达县',lon:100.33,lat:32.27,type:'city',altitude:4000},{name:'巴塘',lon:99.11,lat:30.01,type:'city',altitude:2580},{name:'乡城',lon:99.80,lat:28.93,type:'city',altitude:2860},{name:'稻城',lon:100.30,lat:29.04,type:'city',altitude:3750},{name:'得荣',lon:99.29,lat:28.71,type:'city',altitude:2300},{name:'汶川',lon:103.59,lat:31.48,type:'city',altitude:1300},{name:'理县',lon:103.17,lat:31.44,type:'city',altitude:1800},{name:'茂县',lon:103.85,lat:31.68,type:'city',altitude:1580},{name:'松潘',lon:103.60,lat:32.64,type:'city',altitude:2850},{name:'九寨沟县',lon:104.24,lat:33.25,type:'city',altitude:1400},{name:'金川',lon:102.06,lat:31.48,type:'city',altitude:2160},{name:'小金',lon:102.36,lat:31.00,type:'city',altitude:2367},{name:'黑水',lon:102.99,lat:32.07,type:'city',altitude:2350},{name:'壤塘',lon:100.98,lat:32.27,type:'city',altitude:3280},{name:'阿坝县',lon:101.71,lat:32.90,type:'city',altitude:3290},{name:'若尔盖',lon:102.96,lat:33.58,type:'city',altitude:3400},{name:'红原县',lon:102.55,lat:32.79,type:'city',altitude:3500},{name:'藏哇寺',lon:101.10,lat:32.29,type:'temple',altitude:3500},{name:'泽布基寺',lon:101.12,lat:32.30,type:'temple',altitude:3500}
+    ];
+
+    // 经典路书定义
+    const classicRoutes = {
+      superloop: { name:'川藏新甘超级大环线', locations:[
+        {name:'成都',lon:104.07,lat:30.67,type:'city',altitude:505},{name:'红原',lon:102.55,lat:32.79,type:'mountain',altitude:3500},{name:'阿坝',lon:102.02,lat:32.90,type:'mountain',altitude:3290},{name:'久治',lon:101.48,lat:33.43,type:'mountain',altitude:3600},{name:'大武镇',lon:100.24,lat:34.81,type:'city',altitude:3700},{name:'甘德',lon:99.89,lat:33.97,type:'mountain',altitude:4000},{name:'大武镇',lon:100.24,lat:34.81,type:'city',altitude:3700},{name:'格尔木',lon:94.90,lat:36.41,type:'city',altitude:2808},{name:'察尔汗盐湖',lon:94.78,lat:36.83,type:'lake',highlight:true,altitude:2670},{name:'格尔木',lon:94.90,lat:36.41,type:'city',altitude:2808},{name:'水上雅丹',lon:93.18,lat:37.62,type:'desert',altitude:2800},{name:'火星营地',lon:92.92,lat:37.90,type:'desert',altitude:2800},{name:'茫崖',lon:90.80,lat:38.25,type:'desert',altitude:2800},{name:'米兰古城',lon:88.93,lat:38.91,type:'heritage',altitude:900},{name:'若羌博物馆',lon:88.16,lat:39.03,type:'heritage',altitude:800},{name:'库尔勒',lon:86.13,lat:41.82,type:'city',altitude:950},{name:'乌鲁木齐',lon:87.62,lat:43.82,type:'city',altitude:800},{name:'独山子',lon:84.83,lat:44.84,type:'city',altitude:500},{name:'独库公路北段',lon:84.55,lat:44.46,type:'mountain',altitude:2000},{name:'百里画廊',lon:83.65,lat:44.12,type:'camping',highlight:true,altitude:1800},{name:'那拉提空中草原',lon:83.69,lat:43.46,type:'camping',highlight:true,altitude:1800},{name:'巴音布鲁克',lon:84.14,lat:42.98,type:'scenic',highlight:true,altitude:2500},{name:'天山大峡谷',lon:83.13,lat:42.11,type:'canyon',altitude:1600},{name:'乌鲁木齐',lon:87.62,lat:43.82,type:'city',altitude:800},{name:'火焰山',lon:89.52,lat:42.93,type:'desert',altitude:500},{name:'柏孜克里克千佛洞',lon:89.62,lat:42.85,type:'heritage',altitude:600},{name:'哈密',lon:93.46,lat:42.82,type:'city',altitude:760},{name:'白石头温泉',lon:93.94,lat:43.28,type:'lake',highlight:true,altitude:1800},{name:'敦煌',lon:94.67,lat:40.14,type:'city',altitude:1139},{name:'莫高窟',lon:94.81,lat:40.05,type:'heritage',highlight:true,altitude:1330},{name:'鸣沙山月牙泉',lon:94.68,lat:40.10,type:'desert',highlight:true,altitude:1150},{name:'敦煌',lon:94.67,lat:40.14,type:'city',altitude:1139},{name:'德令哈',lon:97.34,lat:37.38,type:'city',altitude:2980},{name:'茶卡盐湖',lon:99.08,lat:36.76,type:'lake',highlight:true,altitude:3059},{name:'青海湖',lon:100.14,lat:36.94,type:'lake',highlight:true,altitude:3200},{name:'大武镇',lon:100.24,lat:34.81,type:'city',altitude:3700},{name:'甘德(终点)',lon:99.89,lat:33.97,type:'mountain',altitude:4000}
+      ]},
+      chuanxi: { name:'川西环线', locations:[
+        {name:'成都',lon:104.07,lat:30.67,type:'city',altitude:505},{name:'都江堰',lon:103.62,lat:31.00,type:'heritage',highlight:true,altitude:730},{name:'卧龙熊猫基地',lon:103.18,lat:30.94,type:'scenic',altitude:1850},{name:'巴朗山垭口',lon:102.91,lat:31.04,type:'mountain',altitude:4480},{name:'四姑娘山双桥沟',lon:102.83,lat:31.07,type:'mountain',highlight:true,altitude:3200},{name:'丹巴甲居藏寨',lon:101.88,lat:30.88,type:'heritage',highlight:true,altitude:1800},{name:'中路藏寨',lon:101.82,lat:30.91,type:'scenic',altitude:1860},{name:'八美墨石公园',lon:101.67,lat:30.55,type:'canyon',highlight:true,altitude:3500},{name:'龙灯草原',lon:100.97,lat:31.12,type:'camping',altitude:3360},{name:'炉霍',lon:100.68,lat:31.39,type:'city',altitude:3250},{name:'卡萨湖',lon:100.35,lat:31.64,type:'lake',altitude:3380},{name:'甘孜县城',lon:99.97,lat:31.62,type:'city',altitude:3390},{name:'白玉寺',lon:98.82,lat:31.02,type:'heritage',altitude:3030},{name:'噶陀寺',lon:98.98,lat:31.18,type:'heritage',altitude:4000},{name:'宗萨寺',lon:98.62,lat:31.65,type:'heritage',altitude:3600},{name:'德格印经院',lon:98.58,lat:31.82,type:'heritage',highlight:true,altitude:3240},{name:'竹庆寺',lon:98.45,lat:32.00,type:'heritage',altitude:3950},{name:'马尼干戈',lon:99.33,lat:32.22,type:'city',altitude:3820},{name:'色达喇荣五明佛学院',lon:100.33,lat:32.27,type:'heritage',highlight:true,altitude:4000},{name:'翁达',lon:101.04,lat:31.71,type:'city',altitude:3100},{name:'塔公草原',lon:101.54,lat:30.32,type:'camping',altitude:3730},{name:'塔公寺',lon:101.54,lat:30.32,type:'heritage',altitude:3730},{name:'雅拉雪山观景台',lon:101.61,lat:30.41,type:'mountain',highlight:true,altitude:3680},{name:'新都桥',lon:101.53,lat:30.04,type:'scenic',highlight:true,altitude:3300},{name:'折多山垭口',lon:101.83,lat:30.08,type:'mountain',altitude:4298},{name:'康定',lon:101.96,lat:30.05,type:'city',altitude:2560},{name:'木格措',lon:102.11,lat:29.61,type:'lake',altitude:1600},{name:'泸定桥',lon:102.24,lat:29.92,type:'heritage',altitude:1321},{name:'成都',lon:104.07,lat:30.67,type:'city',altitude:505}
+      ]},
+      qinggan: { name:'青甘大环线', locations:[
+        {name:'西宁',lon:101.78,lat:36.62,type:'city',altitude:2260},{name:'塔尔寺',lon:101.58,lat:36.47,type:'heritage',highlight:true,altitude:2690},{name:'青海湖（二郎剑）',lon:100.14,lat:36.94,type:'lake',highlight:true,altitude:3200},{name:'黑马河日出',lon:99.75,lat:36.78,type:'scenic',altitude:3180},{name:'茶卡盐湖',lon:99.08,lat:36.76,type:'lake',highlight:true,altitude:3059},{name:'茶卡天空壹号',lon:98.96,lat:36.72,type:'lake',altitude:3040},{name:'橡皮山',lon:98.52,lat:36.89,type:'mountain',altitude:3817},{name:'德令哈',lon:97.34,lat:37.38,type:'city',altitude:2980},{name:'可鲁克湖&托素湖',lon:97.12,lat:37.21,type:'lake',altitude:2840},{name:'小柴旦湖',lon:95.83,lat:37.69,type:'lake',altitude:3020},{name:'U型公路（G315）',lon:94.92,lat:37.79,type:'scenic',highlight:true,altitude:3080},{name:'大柴旦翡翠湖',lon:94.34,lat:37.86,type:'lake',highlight:true,altitude:3148},{name:'东台吉乃尔湖',lon:93.92,lat:37.65,type:'lake',highlight:true,altitude:2860},{name:'水上雅丹',lon:93.18,lat:37.62,type:'desert',highlight:true,altitude:2800},{name:'西台吉乃尔湖（双色湖）',lon:92.74,lat:37.53,type:'lake',highlight:true,altitude:2780},{name:'火星营地',lon:92.92,lat:37.90,type:'desert',altitude:2800},{name:'茫崖翡翠湖',lon:90.76,lat:38.27,type:'lake',altitude:2830},{name:'艾肯泉（恶魔之眼）',lon:90.63,lat:38.42,type:'scenic',highlight:true,altitude:2900},{name:'敦煌',lon:94.67,lat:40.14,type:'city',altitude:1139},{name:'鸣沙山月牙泉',lon:94.68,lat:40.10,type:'desert',highlight:true,altitude:1150},{name:'莫高窟',lon:94.81,lat:40.05,type:'heritage',highlight:true,altitude:1330},{name:'敦煌古城',lon:94.61,lat:40.16,type:'heritage',altitude:1160},{name:'瓜州戈壁公路',lon:95.70,lat:40.54,type:'scenic',altitude:1200},{name:'嘉峪关长城',lon:98.22,lat:39.80,type:'heritage',highlight:true,altitude:1600},{name:'张掖七彩丹霞',lon:100.03,lat:38.93,type:'canyon',highlight:true,altitude:1800},{name:'马蹄寺',lon:100.18,lat:39.64,type:'heritage',altitude:2650},{name:'民乐扁都口',lon:100.86,lat:38.37,type:'scenic',altitude:2800},{name:'峨堡古城',lon:101.65,lat:37.97,type:'heritage',altitude:3430},{name:'祁连山大草原',lon:100.94,lat:38.02,type:'camping',highlight:true,altitude:3000},{name:'卓尔山',lon:100.24,lat:38.14,type:'mountain',highlight:true,altitude:4300},{name:'门源油菜花',lon:101.62,lat:37.38,type:'scenic',altitude:2860},{name:'西宁',lon:101.78,lat:36.62,type:'city',altitude:2260}
+      ]},
+      gangrenboqi: { name:'冈仁波齐转山之旅', locations:[
+        {name:'拉萨',lon:91.13,lat:29.65,type:'city',altitude:3650},{name:'布达拉宫',lon:91.13,lat:29.66,type:'heritage',highlight:true,altitude:3750},{name:'大昭寺',lon:91.132,lat:29.657,type:'heritage',highlight:true,altitude:3650},{name:'羊卓雍措',lon:90.65,lat:28.98,type:'lake',highlight:true,altitude:4441},{name:'卡若拉冰川',lon:90.22,lat:28.92,type:'mountain',altitude:5020},{name:'江孜白居寺',lon:89.61,lat:28.92,type:'heritage',altitude:3900},{name:'日喀则',lon:88.88,lat:29.27,type:'city',altitude:3836},{name:'扎什伦布寺',lon:88.88,lat:29.27,type:'heritage',highlight:true,altitude:3836},{name:'拉孜',lon:87.63,lat:29.08,type:'city',altitude:4010},{name:'嘉措拉山口',lon:86.78,lat:28.87,type:'mountain',altitude:5248},{name:'珠峰大本营',lon:86.85,lat:28.14,type:'mountain',highlight:true,altitude:5200},{name:'希夏邦马观景台',lon:85.72,lat:28.62,type:'mountain',altitude:4720},{name:'佩枯措',lon:85.25,lat:29.03,type:'lake',highlight:true,altitude:4590},{name:'萨嘎',lon:85.31,lat:29.33,type:'city',altitude:4500},{name:'仲巴草原',lon:83.96,lat:30.05,type:'camping',altitude:4610},{name:'帕羊镇',lon:83.47,lat:30.25,type:'city',altitude:4650},{name:'玛旁雍错',lon:81.28,lat:30.68,type:'lake',highlight:true,altitude:4588},{name:'拉昂错（鬼湖）',lon:81.15,lat:30.64,type:'lake',altitude:4570},{name:'冈仁波齐',lon:81.25,lat:31.07,type:'mountain',highlight:true,altitude:6656},{name:'塔钦（转山起点）',lon:81.20,lat:31.00,type:'city',altitude:4600},{name:'科迦寺',lon:80.30,lat:30.80,type:'heritage',altitude:3850},{name:'札达土林',lon:79.80,lat:31.48,type:'canyon',highlight:true,altitude:3800},{name:'古格王朝遗址',lon:79.68,lat:31.46,type:'heritage',highlight:true,altitude:3900},{name:'狮泉河（阿里）',lon:80.10,lat:32.50,type:'city',altitude:4500},{name:'班公湖',lon:79.84,lat:33.73,type:'lake',highlight:true,altitude:4240},{name:'改则',lon:84.08,lat:32.32,type:'city',altitude:4420},{name:'尼玛',lon:87.25,lat:31.80,type:'city',altitude:4500},{name:'当惹雍措',lon:86.80,lat:31.08,type:'lake',highlight:true,altitude:4530},{name:'文布南村',lon:86.76,lat:31.02,type:'camping',altitude:4500},{name:'纳木错',lon:90.60,lat:30.78,type:'lake',highlight:true,altitude:4718},{name:'当雄',lon:91.15,lat:30.47,type:'city',altitude:4200},{name:'拉萨',lon:91.13,lat:29.65,type:'city',altitude:3650}
+      ]},
+      dushanzi: { name:'独库公路全程', locations:[
+        {name:'独山子',lon:84.83,lat:44.84,type:'city',altitude:500},{name:'独山子大峡谷',lon:84.76,lat:44.81,type:'canyon',altitude:620},{name:'独库公路零公里起点',lon:84.81,lat:44.83,type:'scenic',highlight:true,altitude:510},{name:'哈希勒根达坂',lon:84.42,lat:44.58,type:'mountain',altitude:3400},{name:'雪墙观景点',lon:84.48,lat:44.52,type:'scenic',altitude:3200},{name:'独库公路北段',lon:84.55,lat:44.46,type:'mountain',altitude:2000},{name:'唐布拉百里画廊',lon:83.65,lat:44.12,type:'scenic',highlight:true,altitude:1800},{name:'仙女湖',lon:83.71,lat:44.09,type:'lake',altitude:1760},{name:'乔尔玛',lon:83.82,lat:43.75,type:'city',altitude:1680},{name:'乔尔玛烈士陵园',lon:83.80,lat:43.76,type:'heritage',altitude:1670},{name:'玉希莫勒盖达坂',lon:83.96,lat:43.60,type:'mountain',altitude:3275},{name:'那拉提空中草原',lon:83.69,lat:43.46,type:'camping',highlight:true,altitude:1800},{name:'那拉提河谷草原',lon:83.73,lat:43.42,type:'camping',altitude:1720},{name:'巩乃斯林场',lon:84.02,lat:43.22,type:'scenic',altitude:2100},{name:'巴音布鲁克',lon:84.14,lat:42.98,type:'scenic',highlight:true,altitude:2500},{name:'九曲十八弯',lon:84.11,lat:42.95,type:'lake',highlight:true,altitude:2480},{name:'天鹅湖',lon:84.18,lat:43.01,type:'lake',altitude:2510},{name:'铁力买提达坂',lon:83.40,lat:42.36,type:'mountain',altitude:3220},{name:'大小龙池',lon:83.22,lat:42.23,type:'lake',highlight:true,altitude:1900},{name:'天山神秘大峡谷',lon:83.13,lat:42.11,type:'canyon',highlight:true,altitude:1600},{name:'库车大寺',lon:82.99,lat:41.73,type:'heritage',altitude:1080},{name:'库车老城',lon:82.95,lat:41.70,type:'heritage',altitude:1060},{name:'库车',lon:82.97,lat:41.72,type:'city',altitude:1070}
+      ]},
+      monastery_pilgrimage: { name: '甘孜阿坝寺院朝圣环线',locations: [
+    {name:'成都',lon:104.07,lat:30.67,type:'city',altitude:505},
+    {name:'康定',lon:101.96,lat:30.05,type:'city',altitude:2560},
+    {name:'塔公寺',lon:101.54,lat:30.32,type:'heritage',altitude:3730},
+    {name:'长青春科尔寺',lon:100.27,lat:29.99,type:'temple',highlight:true,altitude:4014},
+    {name:'嘛通寺',lon:100.30,lat:29.90,type:'temple',altitude:3800},
+    {name:'亚青寺',lon:99.42,lat:31.35,type:'monastery',highlight:true,altitude:4000},
+    {name:'多科寺', lon:99.58, lat:31.04, type:'temple', altitude:3900},
+    {name:'白玉寺',lon:98.82,lat:31.02,type:'temple',altitude:3030},
+    {name:'噶陀寺',lon:98.98,lat:31.18,type:'temple',altitude:4000},
+    {name:'宗萨寺',lon:98.62,lat:31.65,type:'temple',altitude:3600},
+    {name:'八邦寺',lon:98.78,lat:31.56,type:'temple',altitude:3800},
+    {name:'德格印经院',lon:98.58,lat:31.82,type:'heritage',highlight:true,altitude:3240},
+    {name:'竹庆寺',lon:98.45,lat:32.00,type:'temple',altitude:3950},
+    {name:'色须寺',lon:98.03,lat:32.98,type:'temple',altitude:4200},
+    {name:'格龙寺',lon:98.10,lat:33.00,type:'temple',altitude:4100},
+    {name:'邓玛大将',lon:98.00,lat:33.30,type:'heritage',altitude:3300},
+    {name:'甘孜寺',lon:99.97,lat:31.62,type:'temple',altitude:3390},
+    {name:'寿灵寺',lon:100.68,lat:31.39,type:'temple',altitude:3250},
+    {name:'色达喇荣五明佛学院',lon:100.33,lat:32.27,type:'temple',highlight:true,altitude:4000},
+    {name:'泽布基寺',lon:101.12,lat:32.30,type:'temple',altitude:3500},
+    {name:'藏哇寺',lon:101.10,lat:32.29,type:'temple',altitude:3500},
+    {name:'确尔基寺',lon:101.11,lat:32.29,type:'temple',altitude:3100},
+    {name:'各莫寺',lon:101.70,lat:33.08,type:'monastery',highlight:true,altitude:3280},
+    {name:'格尔登寺',lon:101.70,lat:32.89,type:'monastery',altitude:3290},
+    {name:'郎依寺',lon:101.78,lat:32.90,type:'monastery',altitude:3290},
+    {name:'观音庙',lon:101.72,lat:31.48,type:'temple',altitude:2500},
+    {name:'昌列寺',lon:102.27,lat:31.91,type:'heritage',altitude:2600},
+    {name:'大藏寺',lon:102.28,lat:32.08,type:'heritage',altitude:3500},
+    {name:'成都',lon:104.07,lat:30.67,type:'city',altitude:505}
+  ]
+}
+    };
+
+    // 状态管理
+    const state = {
+      routeKey: 'chuanxi',
+      route: null,
+      progress: 0,
+      speed: 1,
+      playing: false,
+      fullscreen: false,
+      lastTime: 0,
+      animationFrame: null,
+      path: [],
+      distances: [],
+      points: [],
+      customLocations: [],
+      savedRoutes: {}
+    };
+
+    const canvas = document.getElementById('mapCanvas');
+    const ctx = canvas.getContext('2d');
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    let activeTheme = localStorage.getItem('activeTheme') || 'dunhuang';
+    let bgCanvas = null, bgCtx = null, bgCacheValid = false;
+
+    function $(id) { return document.getElementById(id); }
+    function showToast(msg) {
+      const toast = $('toast');
+      toast.textContent = msg; toast.classList.add('show');
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => toast.classList.remove('show'), 1800);
+    }
+
+    function getVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+    // 主题切换
+    function applyTheme(key) {
+      const theme = colorThemes[key] || colorThemes.dunhuang;
+      Object.entries(theme).forEach(([k,v]) => { if (k!=='name') document.documentElement.style.setProperty(k,v); });
+      $('themeName').textContent = theme.name;
+      activeTheme = key;
+      localStorage.setItem('activeTheme', key);
+      bgCacheValid = false;
+      if (state.route) { calculateRouteGeometry(); draw(); }
+    }
+    function cycleTheme() {
+      const keys = Object.keys(colorThemes);
+      const idx = keys.indexOf(activeTheme);
+      applyTheme(keys[(idx+1)%keys.length]);
+      showToast(colorThemes[activeTheme].name);
+    }
+
+    // 工具函数
+    function haversineDistance(lat1,lon1,lat2,lon2) {
+      const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180;
+      const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+      return Math.round(R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+    }
+    function catmullRom(p0,p1,p2,p3,t) {
+      const t2=t*t, t3=t2*t;
+      return 0.5*((2*p1)+(-p0+p2)*t+(2*p0-5*p1+4*p2-p3)*t2+(-p0+3*p1-3*p2+p3)*t3);
+    }
+
+    // 背景缓存
+    function drawBackground(ctx,w,h) {
+      ctx.fillStyle = getVar('--paper-50');
+      ctx.fillRect(0,0,w,h);
+      ctx.strokeStyle = getVar('--sketch-300'); ctx.lineWidth=1;
+      ctx.strokeRect(12,12,w-24,h-24);
+      ctx.strokeStyle = 'rgba(196,168,130,0.1)';
+      for(let i=0;i<7;i++){ const y=42+i*(h-84)/6; ctx.beginPath(); ctx.moveTo(22,y); ctx.lineTo(w-22,y); ctx.stroke(); }
+      for(let i=0;i<5;i++){ const x=32+i*(w-64)/4; ctx.beginPath(); ctx.moveTo(x,22); ctx.lineTo(x,h-22); ctx.stroke(); }
+      drawCompass(ctx,w-44,52);
+    }
+    function drawCompass(ctx,x,y) {
+      ctx.save(); ctx.translate(x,y);
+      ctx.fillStyle = getVar('--accent-500'); ctx.beginPath(); ctx.moveTo(0,-18); ctx.lineTo(-7,0); ctx.lineTo(7,0); ctx.fill();
+      ctx.fillStyle = getVar('--ink-800'); ctx.beginPath(); ctx.moveTo(0,18); ctx.lineTo(-7,0); ctx.lineTo(7,0); ctx.fill();
+      ctx.font='bold 10px Georgia'; ctx.textAlign='center'; ctx.fillText('N',0,-23);
+      ctx.restore();
+    }
+    function buildBackgroundCache(w,h) {
+      if(!bgCanvas){ bgCanvas=document.createElement('canvas'); bgCtx=bgCanvas.getContext('2d'); }
+      bgCanvas.width=Math.max(1,Math.floor(w*dpr)); bgCanvas.height=Math.max(1,Math.floor(h*dpr));
+      bgCtx.setTransform(dpr,0,0,dpr,0,0);
+      drawBackground(bgCtx,w,h);
+      bgCacheValid=true;
+    }
+    function ensureBackgroundCache(w,h) {
+      if(!bgCacheValid||!bgCanvas||bgCanvas.width/dpr!==w||bgCanvas.height/dpr!==h) buildBackgroundCache(w,h);
+    }
+
+    // 画布尺寸
+    function resizeCanvas() {
+      const rect=canvas.getBoundingClientRect();
+      const w=Math.max(1,rect.width), h=Math.max(1,rect.height);
+      canvas.width=Math.floor(w*dpr); canvas.height=Math.floor(h*dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      bgCacheValid=false;
+      calculateRouteGeometry();
+      draw();
+    }
+
+    // 路线加载与计算
+    function loadRoute(routeKey) {
+      let route = null;
+      if (classicRoutes[routeKey]) route = classicRoutes[routeKey];
+      else if (state.savedRoutes[routeKey]) route = state.savedRoutes[routeKey];
+      if (!route) return;
+      state.routeKey = routeKey;
+      state.route = JSON.parse(JSON.stringify(route));
+      state.progress = 0;
+      state.playing = false;
+      $('routeName').textContent = state.route.name;
+      $('routeSelect').value = routeKey;
+      calculateRouteGeometry();
+      updateStats();
+      renderRouteList();
+      draw();
+      showToast(`已加载：${state.route.name}`);
+      $('deleteCustomRouteBtn').style.display = (state.savedRoutes[routeKey] && !classicRoutes[routeKey]) ? 'block' : 'none';
+    }
+
+    function calculateRouteGeometry() {
+      if(!state.route) return;
+      const rect=canvas.getBoundingClientRect();
+      const w=rect.width||1, h=rect.height||1;
+      const locs=state.route.locations;
+      const minLon=Math.min(...locs.map(l=>l.lon)), maxLon=Math.max(...locs.map(l=>l.lon));
+      const minLat=Math.min(...locs.map(l=>l.lat)), maxLat=Math.max(...locs.map(l=>l.lat));
+      const lonSpan=Math.max(0.01,maxLon-minLon), latSpan=Math.max(0.01,maxLat-minLat);
+      const padX=Math.max(30,w*0.11), padY=Math.max(40,h*0.10);
+      state.points = locs.map(loc=>({
+        ...loc,
+        x: padX + ((loc.lon-minLon)/lonSpan)*(w-padX*2),
+        y: h - padY - ((loc.lat-minLat)/latSpan)*(h-padY*2)
+      }));
+      state.distances=[];
+      for(let i=0;i<locs.length-1;i++) state.distances.push(haversineDistance(locs[i].lat,locs[i].lon,locs[i+1].lat,locs[i+1].lon));
+      generatePath();
+    }
+
+    function generatePath() {
+      const pts=state.points;
+      const path=[];
+      if(pts.length<2){ state.path=path; return; }
+      for(let i=0;i<pts.length-1;i++) {
+        const p0=pts[Math.max(0,i-1)], p1=pts[i], p2=pts[i+1], p3=pts[Math.min(pts.length-1,i+2)];
+        const pixelDist=Math.hypot(p2.x-p1.x, p2.y-p1.y);
+        const step=Math.max(0.008, Math.min(0.06, 1/(pixelDist*1.5)));
+        for(let t=0;t<1;t+=step) path.push({x:catmullRom(p0.x,p1.x,p2.x,p3.x,t), y:catmullRom(p0.y,p1.y,p2.y,p3.y,t)});
+      }
+      path.push({x:pts[pts.length-1].x, y:pts[pts.length-1].y});
+      state.path=path;
+    }
+
+    function totalDistance() { return state.distances.reduce((a,b)=>a+b,0); }
+    function normalizedProgress() { const v=Number(state.progress); return Number.isFinite(v)?Math.max(0,Math.min(1,v)):0; }
+    function currentIndex() {
+      if(!state.route) return 0;
+      const max=state.route.locations.length-1;
+      return Math.min(max, Math.max(0, Math.floor(normalizedProgress()*max+0.0001)));
+    }
+
+    function updateStats() {
+      state.progress = normalizedProgress();
+      const pct = Math.round(state.progress * 100);
+      $('totalDistance').textContent = totalDistance();
+      $('locationCount').textContent = state.route ? state.route.locations.length : 0;
+      $('progressText').textContent = pct;
+      $('circlePercent').textContent = pct;
+      $('progressValue').textContent = pct;
+      $('progressRange').value = pct;
+      $('progressCircle').style.strokeDashoffset = 144.51 * (1 - state.progress);
+      $('fullscreenProgressBar').style.width = `${pct}%`;
+
+      const idx = currentIndex();
+      const loc = state.route?.locations[idx];
+      const displayText = loc ? `${idx+1}. ${loc.name}  (${loc.altitude || 0}m)` : '准备出发';
+      $('currentStop').textContent = displayText;
+      $('fullscreenCurrent').textContent = displayText;
+
+      updateRouteListState(idx);
+    }
+
+    function renderRouteList() {
+      const list=$('routeList');
+      list.innerHTML='';
+      if(!state.route) return;
+      state.route.locations.forEach((loc,i)=>{
+        const item=document.createElement('div');
+        item.className=`route-item ${loc.highlight?'highlight':''}`;
+        item.dataset.index=i;
+        const icon = typeIcons[loc.type] || '📍';
+        item.innerHTML=`
+          <span class="route-dot">${i+1}</span>
+          <div class="min-w-0">
+            <div class="route-title truncate">${icon} ${loc.name}</div>
+            <div class="text-xs" style="color:var(--sketch-500)">${loc.altitude||0}m</div>
+          </div>
+          <span class="text-xs" style="color:var(--sketch-500)">${i===0?'起点':`${state.distances[i-1]}km`}</span>
+        `;
+        item.addEventListener('click',()=>{
+          const max=Math.max(1,state.route.locations.length-1);
+          state.progress=i/max; state.playing=false;
+          updateStats(); draw();
+        });
+        list.appendChild(item);
+      });
+      updateRouteListState(currentIndex());
+    }
+
+    function updateRouteListState(idx) {
+      document.querySelectorAll('.route-item').forEach(item=>{
+        const i=Number(item.dataset.index);
+        item.classList.toggle('active',i===idx);
+        item.classList.toggle('reached',i<idx);
+        if(i===idx && state.playing) item.scrollIntoView({block:'nearest',behavior:'smooth'});
+      });
+    }
+
+    // 绘制
+    function draw() {
+      const rect=canvas.getBoundingClientRect();
+      const w=rect.width, h=rect.height;
+      ctx.clearRect(0,0,w,h);
+      ensureBackgroundCache(w,h);
+      if(bgCanvas&&bgCtx) ctx.drawImage(bgCanvas,0,0,w,h);
+      drawRoute(); drawLocations(); drawCar(); drawMileage(w,h);
+    }
+
+    function drawRoute() {
+      if(!state.path.length) return;
+      const progIdx=Math.floor(normalizedProgress()*(state.path.length-1));
+      ctx.lineCap='round'; ctx.lineJoin='round';
+      ctx.strokeStyle=getVar('--sketch-400'); ctx.globalAlpha=0.32; ctx.lineWidth=3;
+      drawPathSegment(0,state.path.length-1);
+      ctx.globalAlpha=1; ctx.strokeStyle=getVar('--accent-500'); ctx.lineWidth=4;
+      drawPathSegment(0,progIdx);
+      drawArrows(progIdx);
+    }
+    function drawPathSegment(start,end) {
+      if(end<=start||!state.path[start]) return;
+      ctx.beginPath(); ctx.moveTo(state.path[start].x,state.path[start].y);
+      for(let i=start+1;i<=end&&i<state.path.length;i++) ctx.lineTo(state.path[i].x,state.path[i].y);
+      ctx.stroke();
+    }
+    function drawArrows(progIdx) {
+      ctx.save(); ctx.fillStyle=getVar('--accent-500');
+      for(let i=32;i<progIdx;i+=36) {
+        const p1=state.path[i-1], p2=state.path[i];
+        if(!p1||!p2) continue;
+        const angle=Math.atan2(p2.y-p1.y,p2.x-p1.x);
+        ctx.save(); ctx.translate(p2.x,p2.y); ctx.rotate(angle);
+        ctx.beginPath(); ctx.moveTo(7,0); ctx.lineTo(-4,-4); ctx.lineTo(-4,4); ctx.fill();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    function drawLocations() {
+    const idxNow = currentIndex();
+    state.points.forEach((loc, i) => {
+        const reached = i <= idxNow;
+        const r = loc.highlight ? 10 : 8;
+        const x = Math.round(loc.x) + 0.5,
+            y = Math.round(loc.y) + 0.5;
+
+        // 绘制圆点
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = reached ? (loc.highlight ? getVar('--accent-500') : getVar('--sketch-500')) : '#fff';
+        ctx.fill();
+        ctx.strokeStyle = loc.highlight ? getVar('--accent-500') : getVar('--ink-700');
+        ctx.lineWidth = loc.highlight ? 2.5 : 1.5;
+        ctx.stroke();
+
+        // 序号
+        ctx.fillStyle = reached ? '#fff' : getVar('--ink-700');
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(i + 1, x, y + 0.5);
+
+        // 显示标签（名称 + 图标）
+        const showLabel = state.points.length <= 12 || loc.highlight || i === 0 || i === state.points.length - 1;
+        if (showLabel) {
+            const icon = typeIcons[loc.type] || '📍';
+            ctx.fillStyle = loc.highlight ? getVar('--accent-500') : getVar('--ink-800');
+            ctx.font = '10px sans-serif';
+            ctx.textBaseline = 'top';
+
+            // 1. 绘制图标（在地点左侧）
+            ctx.fillText(icon, x - 14, y + r + 5);
+
+            // 2. 绘制名称（图标右侧，限制宽度防止溢出）
+            const maxNameWidth = 70; // 像素
+            let label = loc.name;
+            ctx.font = '10px sans-serif';
+            let labelWidth = ctx.measureText(label).width;
+            while (labelWidth > maxNameWidth && label.length > 2) {
+                label = label.slice(0, -1);
+                labelWidth = ctx.measureText(label + '…').width;
+            }
+            if (label !== loc.name) label += '…';
+
+            // 名称起始 x 坐标（图标宽度约 12px，留出间隙）
+            const labelX = x + 4;
+            ctx.fillStyle = loc.highlight ? getVar('--accent-500') : getVar('--ink-800');
+            ctx.fillText(label, labelX, y + r + 5);
+        }
+    });
+
+    // 当前点海拔（额外显示）
+    const curLoc = state.points[idxNow];
+    if (curLoc && curLoc.altitude) {
+        ctx.save();
+        ctx.fillStyle = getVar('--accent-500');
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(`${curLoc.altitude}m`, curLoc.x + 14, curLoc.y - 6);
+        ctx.restore();
+    }
+    }
+
+    function drawCar() {
+      if(!state.path.length) return;
+      const progIdx=Math.floor(normalizedProgress()*(state.path.length-1));
+      const cur=state.path[progIdx], nxt=state.path[Math.min(progIdx+1,state.path.length-1)]||cur;
+      if(!cur||!nxt||!Number.isFinite(cur.x)||!Number.isFinite(cur.y)) return;
+      const angle=Math.atan2(nxt.y-cur.y, nxt.x-cur.x);
+      ctx.save(); ctx.translate(Math.round(cur.x)+0.5, Math.round(cur.y)+0.5); ctx.rotate(angle);
+      ctx.strokeStyle=getVar('--ink-800'); ctx.lineWidth=2; ctx.fillStyle=getVar('--accent-500');
+      ctx.beginPath(); ctx.roundRect(-13,-8,26,16,5); ctx.fill(); ctx.stroke();
+      ctx.fillStyle='#fff'; ctx.beginPath(); ctx.roundRect(-6,-6,10,8,2); ctx.fill(); ctx.strokeStyle=getVar('--ink-800'); ctx.lineWidth=1; ctx.stroke();
+      ctx.fillStyle=getVar('--ink-800'); ctx.beginPath(); ctx.arc(-8,8,4,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(8,8,4,0,Math.PI*2); ctx.fill();
+      ctx.restore();
+    }
+    function drawMileage(w,h) {
+      const text=`全程直线约 ${totalDistance()} km · ${state.route?.locations.length||0} 地点`;
+      ctx.fillStyle='rgba(255,255,255,0.86)'; ctx.fillRect(16,h-40,Math.min(w-32,178),25);
+      ctx.fillStyle=getVar('--ink-700'); ctx.font='11px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
+      ctx.fillText(text,24,h-27);
+    }
+
+    // 播放控制
+    function enterFullscreen() { if(state.fullscreen) return; state.fullscreen=true; document.body.classList.add('is-playing-fullscreen'); const frame=document.querySelector('.map-frame'); if(frame.requestFullscreen) frame.requestFullscreen().catch(()=>{}); setTimeout(resizeCanvas,80); }
+    function exitFullscreen() { if(!state.fullscreen) return; state.fullscreen=false; document.body.classList.remove('is-playing-fullscreen'); if(document.fullscreenElement&&document.exitFullscreen) document.exitFullscreen().catch(()=>{}); setTimeout(resizeCanvas,80); }
+    function play() { if(state.progress>=1) state.progress=0; enterFullscreen(); state.playing=true; state.lastTime=performance.now(); cancelAnimationFrame(state.animationFrame); state.animationFrame=requestAnimationFrame(tick); }
+    function pause() { state.playing=false; cancelAnimationFrame(state.animationFrame); exitFullscreen(); updateStats(); }
+    function reset() { pause(); state.progress=0; updateStats(); draw(); }
+    function tick(time) {
+      if(!state.playing) return;
+      const delta=Math.min(80,time-state.lastTime); state.lastTime=time;
+      state.progress=normalizedProgress()+delta*0.000035*state.speed;
+      if(state.progress>=1){ state.progress=1; state.playing=false; exitFullscreen(); showToast('旅程已抵达终点'); }
+      updateStats(); draw();
+      if(state.playing) state.animationFrame=requestAnimationFrame(tick);
+    }
+
+    // 自定义路线管理
+    function updateRouteSelect() {
+      const select=$('routeSelect');
+      select.innerHTML = '';
+      const classicKeys = Object.keys(classicRoutes);
+      classicKeys.forEach(key => {
+        const opt = document.createElement('option');
+        opt.value = key; opt.textContent = classicRoutes[key].name;
+        select.appendChild(opt);
+      });
+      Object.keys(state.savedRoutes).forEach(key => {
+        const opt = document.createElement('option');
+        opt.value = key; opt.textContent = '📌 ' + state.savedRoutes[key].name;
+        select.appendChild(opt);
+      });
+      select.value = state.routeKey;
+      const isCustom = state.savedRoutes[state.routeKey] && !classicRoutes[state.routeKey];
+      $('deleteCustomRouteBtn').style.display = isCustom ? 'block' : 'none';
+    }
+
+    function loadSavedRoutes() {
+      const raw = localStorage.getItem('custom_routes');
+      if (raw) { try { state.savedRoutes = JSON.parse(raw); } catch(e){} }
+    }
+    function saveSavedRoutes() {
+      localStorage.setItem('custom_routes', JSON.stringify(state.savedRoutes));
+    }
+
+    function saveCustomRoute() {
+      const name = $('customRouteName').value.trim() || '我的路线';
+      if (state.customLocations.length < 2) { showToast('至少需要2个地点'); return; }
+      const key = 'custom_' + Date.now();
+      state.savedRoutes[key] = { name, locations: state.customLocations.slice() };
+      saveSavedRoutes();
+      updateRouteSelect();
+      loadRoute(key);
+      showToast('路线已保存');
+      state.customLocations = [];
+      $('customLocationList').innerHTML = '';
+      $('customRouteName').value = '';
+    }
+
+    function clearCustomEdit() {
+      state.customLocations = [];
+      $('customLocationList').innerHTML = '';
+      showToast('编辑区已清空');
+    }
+
+    function addToCustom(spot) {
+      state.customLocations.push({ ...spot });
+      renderCustomList();
+      showToast(`已添加：${spot.name}`);
+    }
+
+    function removeFromCustom(index) {
+      state.customLocations.splice(index, 1);
+      renderCustomList();
+    }
+
+    function renderCustomList() {
+      const container = $('customLocationList');
+      container.innerHTML = state.customLocations.map((loc, idx) => {
+        const icon = typeIcons[loc.type] || '📍';
+        return `
+          <div class="flex items-center gap-2 py-1 border-b border-gray-200 text-xs">
+            <span class="w-5 h-5 flex items-center justify-center rounded-full bg-${loc.highlight?'accent':'gray'}-100 text-${loc.highlight?'accent':'gray'}-600 font-bold">${idx+1}</span>
+            <span class="flex-1 truncate">${icon} ${loc.name}</span>
+            <span class="text-gray-400">${loc.altitude}m</span>
+            <button class="text-red-400" onclick="window._removeCustom(${idx})"><i class="fa fa-times"></i></button>
+          </div>
+        `;
+      }).join('');
+    }
+    window._removeCustom = removeFromCustom;
+
+    // 地点库弹窗
+    function openLibrary() {
+      $('libraryModal').classList.remove('hidden');
+      renderLibrary('');
+    }
+    function closeLibrary() { $('libraryModal').classList.add('hidden'); }
+    function renderLibrary(filter) {
+      const container = $('libraryList');
+      const lower = filter.toLowerCase();
+      const categories = [
+        { title: '川西/甘孜阿坝', items: fullDatabase.filter(d => d.lon > 97 && d.lon < 105 && d.lat > 25 && d.lat < 35) },
+        { title: '西藏', items: fullDatabase.filter(d => d.lon > 78 && d.lon < 100 && d.lat > 26 && d.lat < 37) },
+        { title: '新疆', items: fullDatabase.filter(d => d.lon > 74 && d.lon < 97 && d.lat > 34 && d.lat < 49) },
+        { title: '青海', items: fullDatabase.filter(d => d.lon > 89 && d.lon < 103 && d.lat > 31 && d.lat < 39) },
+        { title: '甘肃/宁夏/陕西', items: fullDatabase.filter(d => d.lon > 100 && d.lon < 112 && d.lat > 33 && d.lat < 42) },
+        { title: '其他热门', items: fullDatabase.filter(d => !( (d.lon > 97 && d.lon < 105 && d.lat > 25 && d.lat < 35) || (d.lon > 78 && d.lon < 100 && d.lat > 26 && d.lat < 37) || (d.lon > 74 && d.lon < 97 && d.lat > 34 && d.lat < 49) || (d.lon > 89 && d.lon < 103 && d.lat > 31 && d.lat < 39) || (d.lon > 100 && d.lon < 112 && d.lat > 33 && d.lat < 42) )) }
+      ];
+      let html = '';
+      categories.forEach(cat => {
+        const filtered = lower ? cat.items.filter(i => i.name.toLowerCase().includes(lower)) : cat.items;
+        if (filtered.length === 0) return;
+        html += `<div class="mb-2"><h4 class="text-sm font-bold mb-1" style="color:var(--ink-700)">${cat.title}</h4><div class="grid grid-cols-2 gap-1">`;
+        filtered.forEach(item => {
+          const icon = typeIcons[item.type] || '📍';
+          html += `<button class="text-xs text-left px-2 py-1 rounded bg-gray-50" onclick="window._addFromLib('${item.name.replace(/'/g, "\\'")}', ${item.lon}, ${item.lat}, '${item.type}', ${item.altitude})">${icon} ${item.name}</button>`;
+        });
+        html += `</div></div>`;
+      });
+      container.innerHTML = html || '<p class="text-sm text-center" style="color:var(--sketch-500)">没有匹配的地点</p>';
+    }
+    window._addFromLib = (name, lon, lat, type, altitude) => {
+      addToCustom({ name, lon, lat, type, altitude });
+      closeLibrary();
+    };
+
+    // 搜索过滤
+    $('spotSearch').addEventListener('input', (e) => {
+      const q = e.target.value.trim();
+      if (q.length < 1) { renderCustomList(); return; }
+      const filtered = fullDatabase.filter(item => item.name.toLowerCase().includes(q.toLowerCase())).slice(0, 8);
+      if (filtered.length > 0) {
+        const container = $('customLocationList');
+        container.innerHTML = state.customLocations.map((loc, idx) => {
+          const icon = typeIcons[loc.type] || '📍';
+          return `
+            <div class="flex items-center gap-2 py-1 border-b border-gray-200 text-xs">
+              <span class="w-5 h-5 flex items-center justify-center rounded-full bg-${loc.highlight?'accent':'gray'}-100 text-${loc.highlight?'accent':'gray'}-600 font-bold">${idx+1}</span>
+              <span class="flex-1 truncate">${icon} ${loc.name}</span>
+              <span class="text-gray-400">${loc.altitude}m</span>
+              <button class="text-red-400" onclick="window._removeCustom(${idx})"><i class="fa fa-times"></i></button>
+            </div>
+          `;
+        }).join('') + '<div class="text-xs text-gray-400 mt-1">搜索结果：</div>' + filtered.map(item => {
+          const icon = typeIcons[item.type] || '📍';
+          return `
+            <div class="flex items-center gap-2 py-1 border-b border-gray-200 text-xs cursor-pointer" onclick="window._addFromSearch('${item.name.replace(/'/g, "\\'")}', ${item.lon}, ${item.lat}, '${item.type}', ${item.altitude})">
+              <span class="text-xs">${icon}</span>
+              <span class="flex-1">${item.name}</span>
+              <span class="text-gray-400">${item.altitude}m</span>
+            </div>
+          `;
+        }).join('');
+      } else {
+        renderCustomList();
+      }
+    });
+
+    window._addFromSearch = (name, lon, lat, type, altitude) => {
+      addToCustom({ name, lon, lat, type, altitude });
+      $('spotSearch').value = '';
+      renderCustomList();
+    };
+
+    // 删除自定义路线
+    function deleteCurrentCustomRoute() {
+      if (!state.savedRoutes[state.routeKey] || classicRoutes[state.routeKey]) return;
+      if (confirm(`确定删除路线“${state.savedRoutes[state.routeKey].name}”吗？`)) {
+        delete state.savedRoutes[state.routeKey];
+        saveSavedRoutes();
+        updateRouteSelect();
+        loadRoute('chuanxi');
+        showToast('路线已删除');
+      }
+    }
+
+    // 事件绑定
+    $('themeBtn').addEventListener('click', cycleTheme);
+    $('loadRouteBtn').addEventListener('click', () => loadRoute($('routeSelect').value));
+    $('playBtn').addEventListener('click', play);
+    $('pauseBtn').addEventListener('click', pause);
+    $('resetBtn').addEventListener('click', reset);
+    $('fullscreenPauseBtn').addEventListener('click', pause);
+    $('fullscreenExitBtn').addEventListener('click', pause);
+    $('speedRange').addEventListener('input', e => { state.speed = Number(e.target.value); $('speedValue').textContent = state.speed.toFixed(1); });
+    $('progressRange').addEventListener('input', e => { pause(); state.progress = Math.max(0, Math.min(1, Number(e.target.value)/100)); updateStats(); draw(); });
+    $('openLibraryBtn').addEventListener('click', openLibrary);
+    $('closeLibraryBtn').addEventListener('click', closeLibrary);
+    $('librarySearch').addEventListener('input', e => renderLibrary(e.target.value));
+    $('saveCustomRouteBtn').addEventListener('click', saveCustomRoute);
+    $('clearCustomBtn').addEventListener('click', clearCustomEdit);
+    $('deleteCustomRouteBtn').addEventListener('click', deleteCurrentCustomRoute);
+    window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 250));
+
+    // 初始化
+    loadSavedRoutes();
+    applyTheme(activeTheme);
+    updateRouteSelect();
+    loadRoute('chuanxi');
+    requestAnimationFrame(resizeCanvas);
+  </script>
+</body>
+</html>
